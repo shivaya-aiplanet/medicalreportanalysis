@@ -20,6 +20,8 @@ if 'processed_text' not in st.session_state:
     st.session_state.processed_text = None
 if 'vector_store' not in st.session_state:
     st.session_state.vector_store = None
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 
 def extract_text_from_image(uploaded_file):
     """Extract text from image using Azure AI Document Intelligence"""
@@ -49,7 +51,7 @@ def extract_text_from_image(uploaded_file):
         return extracted_text
         
     except Exception as e:
-        st.error(f"Error in Azure Document Intelligence processing: {str(e)}")
+        st.error(f"Error in processing document: {str(e)}")
         return None
 
 @st.cache_resource
@@ -93,7 +95,7 @@ def create_vector_store_cached(text):
         
         return vector_store
     except Exception as e:
-        st.error(f"Error creating vector store: {str(e)}")
+        st.error(f"Error setting up analysis system: {str(e)}")
         return None
 
 def analyze_medical_report(vector_store, query):
@@ -146,7 +148,7 @@ def analyze_medical_report(vector_store, query):
 
 # Main app
 st.title("🏥 Medical Report Analysis")
-st.write("Upload a medical report image for AI-powered analysis using Azure Document Intelligence")
+st.write("Upload a medical report image for AI-powered analysis")
 
 # File uploader
 uploaded_file = st.file_uploader(
@@ -163,7 +165,7 @@ if uploaded_file is not None:
     
     # Process button
     if st.button("Process Report"):
-        with st.spinner("Extracting text using Azure Document Intelligence..."):
+        with st.spinner("📄 Reading your medical report..."):
             # Extract text using Azure AI Document Intelligence
             extracted_text = extract_text_from_image(uploaded_file)
             
@@ -171,15 +173,16 @@ if uploaded_file is not None:
                 st.session_state.processed_text = extracted_text
                 
                 # Create vector store using cached function for better performance
-                with st.spinner("Creating knowledge base..."):
+                with st.spinner("🧠 Preparing AI analysis system..."):
                     vector_store = create_vector_store_cached(extracted_text)
                     if vector_store:
                         st.session_state.vector_store = vector_store
-                        st.success("Report processed successfully!")
+                        st.session_state.chat_history = []  # Reset chat history for new document
+                        st.success("✅ Report processed successfully! You can now ask questions below.")
                     else:
-                        st.error("Failed to create knowledge base")
+                        st.error("Failed to prepare analysis system")
             else:
-                st.error("Failed to extract text from document")
+                st.error("Failed to read the document")
 
 # Display extracted text
 if st.session_state.processed_text:
@@ -191,31 +194,67 @@ if st.session_state.vector_store:
     st.subheader("📊 Medical Report Analysis")
     
     # Predefined analysis options
-    analysis_options = [
-        "Provide a comprehensive analysis of this medical report",
-        "What are the key findings in this report?",
-        "Are there any abnormal values or concerning findings?",
-        "What follow-up actions are recommended?",
-        "Summarize the patient's condition"
-    ]
+    st.write("**Quick Analysis Options:**")
+    col1, col2 = st.columns(2)
     
-    selected_analysis = st.selectbox("Choose analysis type:", analysis_options)
+    with col1:
+        if st.button("📋 Comprehensive Analysis", use_container_width=True):
+            query = "Provide a comprehensive analysis of this medical report"
+            st.session_state.chat_history.append(("user", query))
+            
+        if st.button("⚠️ Abnormal Findings", use_container_width=True):
+            query = "Are there any abnormal values or concerning findings?"
+            st.session_state.chat_history.append(("user", query))
     
-    # Custom query option
-    custom_query = st.text_input("Or ask a custom question about the report:")
+    with col2:
+        if st.button("🔍 Key Findings", use_container_width=True):
+            query = "What are the key findings in this report?"
+            st.session_state.chat_history.append(("user", query))
+            
+        if st.button("📝 Follow-up Recommendations", use_container_width=True):
+            query = "What follow-up actions are recommended?"
+            st.session_state.chat_history.append(("user", query))
     
-    if st.button("Analyze Report"):
-        query = custom_query if custom_query else selected_analysis
+    st.markdown("---")
+    
+    # Chat interface
+    st.write("**💬 Ask Questions About Your Report:**")
+    
+    # Display chat history
+    for i, (role, message) in enumerate(st.session_state.chat_history):
+        if role == "user":
+            with st.container():
+                st.write(f"**You:** {message}")
+        else:
+            with st.container():
+                st.write(f"**AI Assistant:** {message}")
+                st.markdown("---")
+    
+    # Process the latest question if there's one
+    if st.session_state.chat_history and st.session_state.chat_history[-1][0] == "user":
+        latest_query = st.session_state.chat_history[-1][1]
         
-        with st.spinner("Analyzing medical report..."):
-            analysis_result = analyze_medical_report(st.session_state.vector_store, query)
+        with st.spinner("🤔 Analyzing your question..."):
+            analysis_result = analyze_medical_report(st.session_state.vector_store, latest_query)
             
             if analysis_result:
-                st.subheader("🔍 Analysis Results")
-                st.write(analysis_result)
+                st.session_state.chat_history.append(("assistant", analysis_result))
+                st.rerun()
             else:
-                st.error("Failed to analyze the report")
+                st.error("Sorry, I couldn't analyze your question. Please try again.")
+    
+    # Input for new questions
+    user_question = st.text_input("Ask a follow-up question:", key="user_input")
+    
+    if st.button("Ask Question") and user_question:
+        st.session_state.chat_history.append(("user", user_question))
+        st.rerun()
+    
+    # Clear chat button
+    if st.button("🗑️ Clear Conversation"):
+        st.session_state.chat_history = []
+        st.rerun()
 
-# Footer
+# Disclaimer
 st.markdown("---")
-st.markdown("**Disclaimer:** This tool is for educational purposes only. Always consult healthcare professionals for medical advice.")
+st.markdown("**⚠️ Disclaimer:** This tool is for educational purposes only. Always consult healthcare professionals for medical advice.")
