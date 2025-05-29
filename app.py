@@ -144,6 +144,31 @@ class MedicalReportAnalyzer:
             'tsh': (0.4, 4.0),
             'hba1c': (0, 5.7)
         }
+        self.setup_embeddings()
+        self.medical_knowledge_base = self.create_medical_knowledge_base()
+    
+    def setup_embeddings(self):
+        """Setup HuggingFace embeddings"""
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+    
+    def create_medical_knowledge_base(self):
+        """Create a medical knowledge base for reference ranges"""
+        medical_data = [
+            "Normal blood glucose levels: 70-100 mg/dL fasting, <140 mg/dL postprandial",
+            "Normal cholesterol: Total <200 mg/dL, LDL <100 mg/dL, HDL >40 mg/dL (men), >50 mg/dL (women)",
+            "Normal hemoglobin: 12-15.5 g/dL (women), 13.5-17.5 g/dL (men)",
+            "Normal white blood cell count: 4,000-11,000 cells/μL",
+            "Normal creatinine: 0.6-1.2 mg/dL",
+            "Normal liver enzymes: ALT <40 U/L, AST <40 U/L",
+            "Normal thyroid: TSH 0.4-4.0 mIU/L",
+            "Normal HbA1c: <5.7% (normal), 5.7-6.4% (prediabetes), ≥6.5% (diabetes)"
+        ]
+        
+        documents = [Document(page_content=data, metadata={}) for data in medical_data]
+        vectorstore = FAISS.from_documents(documents, self.embeddings)
+        return vectorstore
     
     def perform_ocr(self, image):
         """Perform OCR using Tesseract"""
@@ -195,11 +220,18 @@ class MedicalReportAnalyzer:
                 min_val, max_val = self.normal_ranges[param]
                 if value < min_val or value > max_val:
                     status = "High" if value > max_val else "Low"
+                    # Get relevant medical knowledge
+                    relevant_info = self.medical_knowledge_base.similarity_search(
+                        f"{param} normal range and significance",
+                        k=1
+                    )[0].page_content
+                    
                     abnormalities.append({
                         'parameter': param,
                         'value': value,
                         'normal_range': f"{min_val}-{max_val}",
-                        'status': status
+                        'status': status,
+                        'medical_context': relevant_info
                     })
         
         return abnormalities
@@ -209,12 +241,13 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>🏥 Medical Report Analyzer</h1>
-        <p>Simple OCR-based analysis of medical reports</p>
+        <p>AI-powered analysis of medical reports</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Initialize analyzer
-    analyzer = MedicalReportAnalyzer()
+    with st.spinner("Initializing Medical Analyzer..."):
+        analyzer = MedicalReportAnalyzer()
     
     # File upload
     uploaded_file = st.file_uploader(
@@ -258,6 +291,7 @@ def main():
                             <h4>{ab['parameter'].title()}: {ab['value']}</h4>
                             <p><strong>Normal Range:</strong> {ab['normal_range']}</p>
                             <p><strong>Status:</strong> {ab['status']}</p>
+                            <p><strong>Medical Context:</strong> {ab['medical_context']}</p>
                         </div>
                         """, unsafe_allow_html=True)
                 else:
