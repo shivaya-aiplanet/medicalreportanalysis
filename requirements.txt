@@ -5,9 +5,6 @@ langchain-huggingface
 qdrant-client
 sentence-transformers
 litellm
-requests
-duckduckgo-search
-beautifulsoup4
-lxml
-aiohttp
-asyncio
+transformers
+torch
+azure-ai-documentintelligence
