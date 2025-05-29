@@ -1,18 +1,3 @@
-# Required packages:
-# streamlit>=1.24.0
-# pandas>=1.5.0
-# numpy>=1.21.0
-# Pillow>=9.0.0
-# plotly>=5.13.0
-# langchain>=0.1.0
-# faiss-cpu>=1.7.4
-# sentence-transformers>=2.2.2
-# pytesseract>=0.3.10
-# opencv-python>=4.7.0
-# PyMuPDF>=1.21.0
-# azure-ai-formrecognizer>=3.2.0
-# litellm>=1.0.0
-# langchain-community>=0.0.10
 
 import streamlit as st
 import pandas as pd
@@ -32,7 +17,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
-from langchain_community.llms import LiteLLM
+from litellm import completion
 from langchain.schema import Document
 
 # OCR and document processing
@@ -130,12 +115,14 @@ class MedicalReportAnalyzer:
         
     def setup_llm(self):
         """Initialize LiteLLM with provided credentials"""
-        self.llm = LiteLLM(
-            model=st.secrets["LITELLM_MODEL"],
-            api_base=st.secrets["LITELLM_BASE_URL"],
-            api_key=st.secrets["LITELLM_API_KEY"],
-            temperature=0.1
-        )
+        # self.llm = LiteLLM(
+        #     model=st.secrets["LITELLM_MODEL"],
+        #     api_base=st.secrets["LITELLM_BASE_URL"],
+        #     api_key=st.secrets["LITELLM_API_KEY"],
+        #     temperature=0.1
+        # )
+        # No need to initialize a LiteLLM object, use litellm.completion directly
+        pass
     
     def setup_embeddings(self):
         """Setup HuggingFace embeddings"""
@@ -406,7 +393,13 @@ class MedicalReportAnalyzer:
             Keep the response concise and clinical.
             """
             
-            response = self.llm(prompt)
+            response = completion(
+                model=st.secrets["LITELLM_MODEL"],
+                api_base=st.secrets["LITELLM_BASE_URL"],
+                api_key=st.secrets["LITELLM_API_KEY"],
+                temperature=0.1,
+                messages=[{"content": prompt, "role": "user"}]
+            ).choices[0].message.content
             return response
         except Exception as e:
             return f"Unable to generate clinical insights: {str(e)}"
