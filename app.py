@@ -1,8 +1,9 @@
 import streamlit as st
 import tempfile
 import os
+from qdrant_client import QdrantClient
 from langchain_community.vectorstores import Qdrant
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_community.chat_models import ChatLiteLLM
@@ -53,7 +54,7 @@ def extract_text_from_image(uploaded_file):
 
 @st.cache_resource
 def create_vector_store_cached(text):
-    """Create vector store from extracted text with caching for better performance"""
+    """Create vector store from extracted text with Qdrant Cloud and FastEmbed"""
     try:
         # Split text into smaller chunks for faster processing
         text_splitter = RecursiveCharacterTextSplitter(
@@ -65,17 +66,27 @@ def create_vector_store_cached(text):
         # Create documents
         documents = [Document(page_content=chunk) for chunk in chunks]
         
-        # Initialize embeddings
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        # Initialize FastEmbed embeddings (lightweight, CPU-optimized)
+        embeddings = FastEmbedEmbeddings(
+            model_name="BAAI/bge-small-en-v1.5",
+            max_length=512,
+            doc_embed_type="passage"
         )
         
-        # Create vector store
+        # Create Qdrant client for cloud
+        client = QdrantClient(
+            url=st.secrets["QDRANT_URL"],
+            api_key=st.secrets["QDRANT_API_KEY"]
+        )
+        
+        # Create vector store with Qdrant Cloud
         vector_store = Qdrant.from_documents(
             documents,
             embeddings,
-            location=":memory:",
-            collection_name="medical_reports"
+            url=st.secrets["QDRANT_URL"],
+            api_key=st.secrets["QDRANT_API_KEY"],
+            collection_name="medical_reports",
+            force_recreate=True
         )
         
         return vector_store
