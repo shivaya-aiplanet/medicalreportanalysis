@@ -12,3 +12,4 @@ PyMuPDF
 azure-ai-formrecognizer
 litellm
 langchain-community
+tesseract
