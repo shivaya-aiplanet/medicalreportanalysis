@@ -1,6 +1,4 @@
 streamlit
-pytesseract
-Pillow
 langchain
 langchain-community
 langchain-huggingface
@@ -9,3 +7,4 @@ sentence-transformers
 litellm
 transformers
 torch
+azure-ai-documentintelligence
