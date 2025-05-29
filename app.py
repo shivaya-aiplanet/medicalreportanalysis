@@ -5,7 +5,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Qdrant
 from langchain.chains import ConversationalRetrievalChain
-from langchain.llms import LiteLLM
+from litellm import completion
 import pytesseract
 from PIL import Image
 import io
@@ -61,21 +61,23 @@ def process_document(uploaded_file):
         
         return chunks
 
-# Function to initialize the QA chain
-def initialize_qa_chain():
-    # Initialize embeddings
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    
-    # Initialize LiteLLM with specific configuration
-    llm = LiteLLM(
-        api_key=os.getenv("LITELLM_API_KEY", "sk-V12plNmxne0F7XIQuyzJDQ"),
-        model_name=os.getenv("LITELLM_MODEL", "gpt-4o-mini"),
-        base_url=os.getenv("LITELLM_BASE_URL", "https://litellm.aiplanet.com/"),
-        temperature=0.3,
-        system_prompt=SYSTEM_PROMPT
-    )
-    
-    return embeddings, llm
+# Function to get LLM response
+def get_llm_response(prompt, context):
+    try:
+        response = completion(
+            model=os.getenv("LITELLM_MODEL", "gpt-4o-mini"),
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Context: {context}\n\nQuestion: {prompt}"}
+            ],
+            api_key=os.getenv("LITELLM_API_KEY", "sk-V12plNmxne0F7XIQuyzJDQ"),
+            base_url=os.getenv("LITELLM_BASE_URL", "https://litellm.aiplanet.com/"),
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error getting LLM response: {str(e)}")
+        return None
 
 # Main app
 def main():
@@ -86,8 +88,8 @@ def main():
         # Process document
         chunks = process_document(uploaded_file)
         
-        # Initialize QA chain
-        embeddings, llm = initialize_qa_chain()
+        # Initialize embeddings
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         
         # Create vector store
         vectorstore = Qdrant.from_texts(
@@ -96,32 +98,30 @@ def main():
             location=":memory:"
         )
         
-        # Create QA chain
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=llm,
-            retriever=vectorstore.as_retriever(),
-            return_source_documents=True
-        )
-        
         # Chat interface
         st.subheader("Ask questions about the report")
         user_question = st.text_input("Your question:")
         
         if user_question:
             with st.spinner("Analyzing..."):
-                # Get response
-                response = qa_chain({"question": user_question, "chat_history": st.session_state.chat_history})
+                # Get relevant context
+                docs = vectorstore.similarity_search(user_question, k=3)
+                context = "\n".join([doc.page_content for doc in docs])
                 
-                # Update chat history
-                st.session_state.chat_history.append((user_question, response["answer"]))
+                # Get response from LLM
+                response = get_llm_response(user_question, context)
                 
-                # Display response
-                st.write("Answer:", response["answer"])
-                
-                # Display sources
-                with st.expander("View Sources"):
-                    for doc in response["source_documents"]:
-                        st.write(doc.page_content)
+                if response:
+                    # Update chat history
+                    st.session_state.chat_history.append((user_question, response))
+                    
+                    # Display response
+                    st.write("Answer:", response)
+                    
+                    # Display sources
+                    with st.expander("View Sources"):
+                        for doc in docs:
+                            st.write(doc.page_content)
 
 if __name__ == "__main__":
     main()
