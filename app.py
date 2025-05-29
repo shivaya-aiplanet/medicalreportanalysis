@@ -108,21 +108,16 @@ def analyze_medical_report(vector_store, query):
             api_base=st.secrets["LITELLM_BASE_URL"]
         )
         
-        # Create prompt template
+        # Create prompt template - simplified for direct answers
         prompt_template = """
-        You are a medical AI assistant analyzing a medical report. Based on the following context from the medical report, please provide a comprehensive analysis.
+        You are a medical AI assistant. Answer the question directly based on the medical report context provided.
+        Be concise and specific. Only provide comprehensive analysis if specifically asked for one.
 
-        Context: {context}
+        Medical Report Context: {context}
 
         Question: {question}
 
-        Please provide a detailed analysis focusing on:
-        1. Key medical findings
-        2. Potential concerns or abnormalities
-        3. Recommendations for follow-up
-        4. Overall assessment
-
-        Analysis:
+        Answer:
         """
         
         prompt = PromptTemplate(
@@ -244,7 +239,7 @@ if st.session_state.vector_store:
                 st.error("Sorry, I couldn't analyze your question. Please try again.")
     
     # Input for new questions
-    user_question = st.text_input("Ask a follow-up question:", key="user_input")
+    user_question = st.text_input("Ask a follow-up question:", key=f"user_input_{len(st.session_state.chat_history)}")
     
     if st.button("Ask Question") and user_question:
         st.session_state.chat_history.append(("user", user_question))
