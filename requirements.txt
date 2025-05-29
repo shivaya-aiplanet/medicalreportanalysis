@@ -1,10 +1,7 @@
 streamlit
 langchain
 langchain-community
-langchain-huggingface
 qdrant-client
-sentence-transformers
+fastembed
 litellm
-transformers
-torch
 azure-ai-documentintelligence
