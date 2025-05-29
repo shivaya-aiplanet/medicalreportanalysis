@@ -108,10 +108,16 @@ def analyze_medical_report(vector_store, query):
             api_base=st.secrets["LITELLM_BASE_URL"]
         )
         
-        # Create prompt template - simplified for direct answers
+        # Create prompt template - adaptive based on question type
         prompt_template = """
-        You are a medical AI assistant. Answer the question directly based on the medical report context provided.
-        Be concise and specific. Only provide comprehensive analysis if specifically asked for one.
+        You are a medical AI assistant. Based on the medical report context provided, answer the question appropriately:
+
+        - For simple factual questions (like patient name, date, specific values): Give a direct, concise answer
+        - For analysis questions (like "comprehensive analysis", "key findings", "abnormal findings", "recommendations"): Provide detailed analysis with:
+          1. Key medical findings
+          2. Potential concerns or abnormalities  
+          3. Recommendations for follow-up
+          4. Overall assessment
 
         Medical Report Context: {context}
 
