@@ -1,6 +1,4 @@
 import streamlit as st
-import pytesseract
-from PIL import Image
 import tempfile
 import os
 from langchain_community.vectorstores import Qdrant
@@ -10,6 +8,7 @@ from langchain.schema import Document
 from langchain_community.chat_models import ChatLiteLLM
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain_community.document_loaders import AzureAIDocumentIntelligenceLoader
 import io
 
 # Page configuration
@@ -21,13 +20,35 @@ if 'processed_text' not in st.session_state:
 if 'vector_store' not in st.session_state:
     st.session_state.vector_store = None
 
-def extract_text_from_image(image):
-    """Extract text from image using Tesseract OCR"""
+def extract_text_from_image(uploaded_file):
+    """Extract text from image using Azure AI Document Intelligence"""
     try:
-        text = pytesseract.image_to_string(image)
-        return text
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_file_path = tmp_file.name
+        
+        # Initialize Azure AI Document Intelligence loader
+        loader = AzureAIDocumentIntelligenceLoader(
+            api_endpoint=st.secrets["AZURE_ENDPOINT"],
+            api_key=st.secrets["AZURE_KEY"],
+            file_path=tmp_file_path,
+            api_model="prebuilt-layout",
+            mode="markdown"
+        )
+        
+        # Load and extract text
+        documents = loader.load()
+        
+        # Clean up temporary file
+        os.unlink(tmp_file_path)
+        
+        # Combine all document content
+        extracted_text = "\n".join([doc.page_content for doc in documents])
+        return extracted_text
+        
     except Exception as e:
-        st.error(f"Error in OCR processing: {str(e)}")
+        st.error(f"Error in Azure Document Intelligence processing: {str(e)}")
         return None
 
 def create_vector_store(text):
@@ -111,30 +132,32 @@ def analyze_medical_report(vector_store, query):
 
 # Main app
 st.title("🏥 Medical Report Analysis")
-st.write("Upload a medical report image for AI-powered analysis")
+st.write("Upload a medical report image for AI-powered analysis using Azure Document Intelligence")
 
 # File uploader
 uploaded_file = st.file_uploader(
     "Choose a medical report image",
-    type=['png', 'jpg', 'jpeg', 'tiff', 'bmp']
+    type=['png', 'jpg', 'jpeg', 'tiff', 'bmp', 'pdf']
 )
 
 if uploaded_file is not None:
-    # Display uploaded image
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Medical Report", use_column_width=True)
+    # Display uploaded image (if it's an image)
+    if uploaded_file.type.startswith('image/'):
+        st.image(uploaded_file, caption="Uploaded Medical Report", use_column_width=True)
+    else:
+        st.write(f"Uploaded file: {uploaded_file.name}")
     
     # Process button
     if st.button("Process Report"):
-        with st.spinner("Extracting text from image...", show_time=True):
-            # Extract text using OCR
-            extracted_text = extract_text_from_image(image)
+        with st.spinner("Extracting text using Azure Document Intelligence..."):
+            # Extract text using Azure AI Document Intelligence
+            extracted_text = extract_text_from_image(uploaded_file)
             
             if extracted_text:
                 st.session_state.processed_text = extracted_text
                 
                 # Create vector store
-                with st.spinner("Creating knowledge base...", show_time=True):
+                with st.spinner("Creating knowledge base..."):
                     vector_store = create_vector_store(extracted_text)
                     if vector_store:
                         st.session_state.vector_store = vector_store
@@ -142,7 +165,7 @@ if uploaded_file is not None:
                     else:
                         st.error("Failed to create knowledge base")
             else:
-                st.error("Failed to extract text from image")
+                st.error("Failed to extract text from document")
 
 # Display extracted text
 if st.session_state.processed_text:
@@ -170,7 +193,7 @@ if st.session_state.vector_store:
     if st.button("Analyze Report"):
         query = custom_query if custom_query else selected_analysis
         
-        with st.spinner("Analyzing medical report...", show_time=True):
+        with st.spinner("Analyzing medical report..."):
             analysis_result = analyze_medical_report(st.session_state.vector_store, query)
             
             if analysis_result:
@@ -183,7 +206,7 @@ if st.session_state.vector_store:
 st.sidebar.title("ℹ️ About")
 st.sidebar.write("""
 This app uses:
-- **Tesseract OCR** for text extraction
+- **Azure AI Document Intelligence** for text extraction
 - **LangChain** for document processing
 - **Qdrant** for vector storage
 - **HuggingFace** for embeddings
