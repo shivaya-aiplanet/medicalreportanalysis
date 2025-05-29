@@ -4,14 +4,15 @@
 # numpy>=1.21.0
 # Pillow>=9.0.0
 # plotly>=5.13.0
-# langchain>=0.0.200
+# langchain>=0.1.0
 # faiss-cpu>=1.7.4
 # sentence-transformers>=2.2.2
 # pytesseract>=0.3.10
 # opencv-python>=4.7.0
 # PyMuPDF>=1.21.0
 # azure-ai-formrecognizer>=3.2.0
-# litellm>=0.1.0
+# litellm>=1.0.0
+# langchain-community>=0.0.10
 
 import streamlit as st
 import pandas as pd
@@ -28,10 +29,10 @@ from plotly.subplots import make_subplots
 
 # LangChain imports
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
-from langchain.llms import LiteLLM
+from langchain_community.llms import LiteLLM
 from langchain.schema import Document
 
 # OCR and document processing
