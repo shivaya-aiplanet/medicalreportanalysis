@@ -3,7 +3,7 @@ import tempfile
 import os
 from qdrant_client import QdrantClient
 from langchain_community.vectorstores import Qdrant
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_community.chat_models import ChatLiteLLM
@@ -54,7 +54,7 @@ def extract_text_from_image(uploaded_file):
 
 @st.cache_resource
 def create_vector_store_cached(text):
-    """Create vector store from extracted text with Qdrant Cloud and FastEmbed"""
+    """Create vector store from extracted text with Qdrant Cloud and Azure OpenAI embeddings"""
     try:
         # Split text into smaller chunks for faster processing
         text_splitter = RecursiveCharacterTextSplitter(
@@ -66,11 +66,13 @@ def create_vector_store_cached(text):
         # Create documents
         documents = [Document(page_content=chunk) for chunk in chunks]
         
-        # Initialize FastEmbed embeddings (lightweight, CPU-optimized)
-        embeddings = FastEmbedEmbeddings(
-            model_name="BAAI/bge-small-en-v1.5",
-            max_length=512,
-            doc_embed_type="passage"
+        # Initialize Azure OpenAI embeddings
+        embeddings = AzureOpenAIEmbeddings(
+            openai_api_key=st.secrets["OPENAI_API_KEY"],
+            azure_deployment=st.secrets["AZURE_DEPLOYMENT"],
+            azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
+            openai_api_version=st.secrets["OPENAI_API_VERSION"],
+            chunk_size=2048,
         )
         
         # Create Qdrant client for cloud
