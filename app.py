@@ -1,307 +1,127 @@
-# Required packages:
-# streamlit>=1.24.0
-# pandas>=1.5.0
-# numpy>=1.21.0
-# Pillow>=9.0.0
-# plotly>=5.13.0
-# langchain>=0.1.0
-# faiss-cpu>=1.7.4
-# sentence-transformers>=2.2.2
-# pytesseract>=0.3.10
-# opencv-python>=4.7.0
-# PyMuPDF>=1.21.0
-# azure-ai-formrecognizer>=3.2.0
-# litellm>=1.0.0
-# langchain-community>=0.0.10
-
 import streamlit as st
-import pandas as pd
-import numpy as np
+import os
+from langchain.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Qdrant
+from langchain.chains import ConversationalRetrievalChain
+from langchain.llms import LiteLLM
+import pytesseract
 from PIL import Image
 import io
-import base64
-import json
-import re
-from datetime import datetime
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import streamlit.components.v1 as components
+from dotenv import load_dotenv
 
-# LangChain imports
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
-from litellm import completion
-from langchain.schema import Document
+# Load environment variables
+load_dotenv()
 
-# OCR and document processing
-import pytesseract
-import cv2
-import fitz  # PyMuPDF
-from azure.ai.formrecognizer import DocumentAnalysisClient
-from azure.core.credentials import AzureKeyCredential
+# Set page config
+st.set_page_config(page_title="Medical Report Analysis", layout="wide")
+st.title("Medical Report Analysis")
 
-# Set page config for wide layout and custom theme
-st.set_page_config(
-    page_title="Medical Report Analyzer",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# System prompt for medical analysis
+SYSTEM_PROMPT = """You are a medical report analysis assistant. Your role is to:
+1. Analyze medical reports and provide clear, accurate interpretations
+2. Highlight important medical findings and their implications
+3. Explain medical terminology in simple terms when needed
+4. Maintain professional and empathetic communication
+5. Focus on factual information from the report
+6. Avoid making definitive diagnoses or treatment recommendations
+7. Always cite specific parts of the report when providing information
 
-# Custom CSS for beautiful UI
-st.markdown("""
-<style>
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-    }
-    
-    .upload-container {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        padding: 2rem;
-        border-radius: 15px;
-        margin: 1rem 0;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-    }
-    
-    .analysis-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        margin: 1rem 0;
-        border-left: 4px solid #4CAF50;
-    }
-    
-    .risk-high {
-        background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-    }
-    
-    .risk-medium {
-        background: linear-gradient(135deg, #feca57, #ff9ff3);
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-    }
-    
-    .risk-low {
-        background: linear-gradient(135deg, #48dbfb, #0abde3);
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-    }
-    
-    .metric-card {
-        background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        text-align: center;
-        margin: 0.5rem;
-    }
-    
-    .stProgress > div > div > div > div {
-        background: linear-gradient(to right, #667eea, #764ba2);
-    }
-    
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
-    }
-    
-    .result-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        margin: 1rem 0;
-        border-left: 4px solid #4CAF50;
-    }
-</style>
-""", unsafe_allow_html=True)
+Remember to:
+- Be precise and clear in your explanations
+- Use appropriate medical terminology while remaining accessible
+- Maintain patient confidentiality
+- Focus on the information present in the report
+- Indicate when information is unclear or missing"""
 
-class MedicalReportAnalyzer:
-    def __init__(self):
-        self.normal_ranges = {
-            'glucose': (70, 100),
-            'cholesterol': (0, 200),
-            'hemoglobin': (12, 17.5),
-            'wbc': (4000, 11000),
-            'creatinine': (0.6, 1.2),
-            'alt': (0, 40),
-            'ast': (0, 40),
-            'tsh': (0.4, 4.0),
-            'hba1c': (0, 5.7)
-        }
-        self.setup_embeddings()
-        self.medical_knowledge_base = self.create_medical_knowledge_base()
-    
-    def setup_embeddings(self):
-        """Setup HuggingFace embeddings"""
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
+# Initialize session state
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+
+# Function to process uploaded document
+def process_document(uploaded_file):
+    with st.spinner("Processing document..."):
+        # Read the file
+        file_bytes = uploaded_file.read()
+        
+        # Convert to image for OCR
+        image = Image.open(io.BytesIO(file_bytes))
+        
+        # Perform OCR
+        text = pytesseract.image_to_string(image)
+        
+        # Split text into chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200
         )
-    
-    def create_medical_knowledge_base(self):
-        """Create a medical knowledge base for reference ranges"""
-        medical_data = [
-            "Normal blood glucose levels: 70-100 mg/dL fasting, <140 mg/dL postprandial",
-            "Normal cholesterol: Total <200 mg/dL, LDL <100 mg/dL, HDL >40 mg/dL (men), >50 mg/dL (women)",
-            "Normal hemoglobin: 12-15.5 g/dL (women), 13.5-17.5 g/dL (men)",
-            "Normal white blood cell count: 4,000-11,000 cells/μL",
-            "Normal creatinine: 0.6-1.2 mg/dL",
-            "Normal liver enzymes: ALT <40 U/L, AST <40 U/L",
-            "Normal thyroid: TSH 0.4-4.0 mIU/L",
-            "Normal HbA1c: <5.7% (normal), 5.7-6.4% (prediabetes), ≥6.5% (diabetes)"
-        ]
+        chunks = text_splitter.split_text(text)
         
-        documents = [Document(page_content=data, metadata={}) for data in medical_data]
-        vectorstore = FAISS.from_documents(documents, self.embeddings)
-        return vectorstore
-    
-    def perform_ocr(self, image):
-        """Perform OCR using Tesseract"""
-        try:
-            # Convert PIL image to OpenCV format
-            img_array = np.array(image)
-            
-            # Preprocess image for better OCR
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-            gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-            
-            # Perform OCR
-            text = pytesseract.image_to_string(gray, config='--psm 6')
-            return text
-        except Exception as e:
-            st.error(f"OCR Error: {str(e)}")
-            return ""
-    
-    def extract_medical_values(self, text):
-        """Extract medical values from text"""
-        patterns = {
-            'glucose': r'glucose[:\s]*(\d+\.?\d*)\s*mg/dl',
-            'cholesterol': r'cholesterol[:\s]*(\d+\.?\d*)\s*mg/dl',
-            'hemoglobin': r'hemoglobin[:\s]*(\d+\.?\d*)\s*g/dl',
-            'wbc': r'wbc[:\s]*(\d+\.?\d*)',
-            'creatinine': r'creatinine[:\s]*(\d+\.?\d*)\s*mg/dl',
-            'alt': r'alt[:\s]*(\d+\.?\d*)\s*u/l',
-            'ast': r'ast[:\s]*(\d+\.?\d*)\s*u/l',
-            'tsh': r'tsh[:\s]*(\d+\.?\d*)',
-            'hba1c': r'hba1c[:\s]*(\d+\.?\d*)%?'
-        }
-        
-        extracted_data = {}
-        text_lower = text.lower()
-        
-        for key, pattern in patterns.items():
-            matches = re.findall(pattern, text_lower, re.IGNORECASE)
-            if matches:
-                extracted_data[key] = float(matches[0])
-        
-        return extracted_data
-    
-    def analyze_values(self, values):
-        """Analyze medical values and identify abnormalities"""
-        abnormalities = []
-        
-        for param, value in values.items():
-            if param in self.normal_ranges:
-                min_val, max_val = self.normal_ranges[param]
-                if value < min_val or value > max_val:
-                    status = "High" if value > max_val else "Low"
-                    # Get relevant medical knowledge
-                    relevant_info = self.medical_knowledge_base.similarity_search(
-                        f"{param} normal range and significance",
-                        k=1
-                    )[0].page_content
-                    
-                    abnormalities.append({
-                        'parameter': param,
-                        'value': value,
-                        'normal_range': f"{min_val}-{max_val}",
-                        'status': status,
-                        'medical_context': relevant_info
-                    })
-        
-        return abnormalities
+        return chunks
 
-def main():
-    # Header
-    st.markdown("""
-    <div class="main-header">
-        <h1>🏥 Medical Report Analyzer</h1>
-        <p>AI-powered analysis of medical reports</p>
-    </div>
-    """, unsafe_allow_html=True)
+# Function to initialize the QA chain
+def initialize_qa_chain():
+    # Initialize embeddings
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     
-    # Initialize analyzer
-    with st.spinner("Initializing Medical Analyzer..."):
-        analyzer = MedicalReportAnalyzer()
-    
-    # File upload
-    uploaded_file = st.file_uploader(
-        "Upload Medical Report Image",
-        type=['png', 'jpg', 'jpeg'],
-        help="Upload an image of your medical report"
+    # Initialize LiteLLM with specific configuration
+    llm = LiteLLM(
+        api_key=os.getenv("LITELLM_API_KEY", "sk-V12plNmxne0F7XIQuyzJDQ"),
+        model_name=os.getenv("LITELLM_MODEL", "gpt-4o-mini"),
+        base_url=os.getenv("LITELLM_BASE_URL", "https://litellm.aiplanet.com/"),
+        temperature=0.3,
+        system_prompt=SYSTEM_PROMPT
     )
     
-    if uploaded_file:
-        # Display image
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Medical Report", use_column_width=True)
+    return embeddings, llm
+
+# Main app
+def main():
+    # File uploader
+    uploaded_file = st.file_uploader("Upload Medical Report", type=['pdf', 'png', 'jpg', 'jpeg'])
+    
+    if uploaded_file is not None:
+        # Process document
+        chunks = process_document(uploaded_file)
         
-        # Process image
-        with st.spinner("Analyzing medical report..."):
-            # Perform OCR
-            text = analyzer.perform_ocr(image)
-            
-            if text:
-                # Extract values
-                values = analyzer.extract_medical_values(text)
+        # Initialize QA chain
+        embeddings, llm = initialize_qa_chain()
+        
+        # Create vector store
+        vectorstore = Qdrant.from_texts(
+            chunks,
+            embeddings,
+            location=":memory:"
+        )
+        
+        # Create QA chain
+        qa_chain = ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=vectorstore.as_retriever(),
+            return_source_documents=True
+        )
+        
+        # Chat interface
+        st.subheader("Ask questions about the report")
+        user_question = st.text_input("Your question:")
+        
+        if user_question:
+            with st.spinner("Analyzing..."):
+                # Get response
+                response = qa_chain({"question": user_question, "chat_history": st.session_state.chat_history})
                 
-                # Analyze values
-                abnormalities = analyzer.analyze_values(values)
+                # Update chat history
+                st.session_state.chat_history.append((user_question, response["answer"]))
                 
-                # Display results
-                st.markdown("### 📊 Analysis Results")
+                # Display response
+                st.write("Answer:", response["answer"])
                 
-                # Show extracted values
-                if values:
-                    st.markdown("#### Extracted Values")
-                    df = pd.DataFrame(list(values.items()), columns=['Parameter', 'Value'])
-                    st.dataframe(df, use_container_width=True)
-                
-                # Show abnormalities
-                if abnormalities:
-                    st.markdown("#### ⚠️ Abnormal Values")
-                    for ab in abnormalities:
-                        st.markdown(f"""
-                        <div class="result-card">
-                            <h4>{ab['parameter'].title()}: {ab['value']}</h4>
-                            <p><strong>Normal Range:</strong> {ab['normal_range']}</p>
-                            <p><strong>Status:</strong> {ab['status']}</p>
-                            <p><strong>Medical Context:</strong> {ab['medical_context']}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.success("✅ No abnormalities detected in the extracted values.")
-                
-                # Show raw OCR text
-                with st.expander("View Raw OCR Text"):
-                    st.text(text)
-            else:
-                st.error("❌ Could not extract text from the image. Please try a clearer image.")
+                # Display sources
+                with st.expander("View Sources"):
+                    for doc in response["source_documents"]:
+                        st.write(doc.page_content)
 
 if __name__ == "__main__":
     main()
