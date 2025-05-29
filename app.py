@@ -51,13 +51,14 @@ def extract_text_from_image(uploaded_file):
         st.error(f"Error in Azure Document Intelligence processing: {str(e)}")
         return None
 
-def create_vector_store(text):
-    """Create vector store from extracted text"""
+@st.cache_resource
+def create_vector_store_cached(text):
+    """Create vector store from extracted text with caching for better performance"""
     try:
-        # Split text into chunks
+        # Split text into smaller chunks for faster processing
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
+            chunk_size=800,
+            chunk_overlap=100
         )
         chunks = text_splitter.split_text(text)
         
@@ -114,11 +115,11 @@ def analyze_medical_report(vector_store, query):
             input_variables=["context", "question"]
         )
         
-        # Create retrieval QA chain
+        # Create retrieval QA chain with reduced k for faster processing
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
-            retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
+            retriever=vector_store.as_retriever(search_kwargs={"k": 2}),
             chain_type_kwargs={"prompt": prompt}
         )
         
@@ -143,7 +144,7 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     # Display uploaded image (if it's an image)
     if uploaded_file.type.startswith('image/'):
-        st.image(uploaded_file, caption="Uploaded Medical Report", use_column_width=True)
+        st.image(uploaded_file, caption="Uploaded Medical Report", use_container_width=True)
     else:
         st.write(f"Uploaded file: {uploaded_file.name}")
     
@@ -156,9 +157,9 @@ if uploaded_file is not None:
             if extracted_text:
                 st.session_state.processed_text = extracted_text
                 
-                # Create vector store
+                # Create vector store using cached function for better performance
                 with st.spinner("Creating knowledge base..."):
-                    vector_store = create_vector_store(extracted_text)
+                    vector_store = create_vector_store_cached(extracted_text)
                     if vector_store:
                         st.session_state.vector_store = vector_store
                         st.success("Report processed successfully!")
@@ -201,19 +202,6 @@ if st.session_state.vector_store:
                 st.write(analysis_result)
             else:
                 st.error("Failed to analyze the report")
-
-# Sidebar with information
-st.sidebar.title("ℹ️ About")
-st.sidebar.write("""
-This app uses:
-- **Azure AI Document Intelligence** for text extraction
-- **LangChain** for document processing
-- **Qdrant** for vector storage
-- **HuggingFace** for embeddings
-- **LiteLLM** for AI analysis
-
-**Note:** This is for educational purposes only and should not replace professional medical advice.
-""")
 
 # Footer
 st.markdown("---")
