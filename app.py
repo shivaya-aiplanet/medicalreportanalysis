@@ -1,57 +1,38 @@
 import streamlit as st
-import os
-from langchain.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Qdrant
-from langchain.chains import ConversationalRetrievalChain
-from litellm import completion
 import pytesseract
 from PIL import Image
+import tempfile
+import os
+from langchain_community.vectorstores import Qdrant
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.schema import Document
+from langchain_community.chat_models import ChatLiteLLM
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
 import io
-import streamlit.components.v1 as components
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-# Set page config
-st.set_page_config(page_title="Medical Report Analysis", layout="wide")
-st.title("Medical Report Analysis")
-
-# System prompt for medical analysis
-SYSTEM_PROMPT = """You are a medical report analysis assistant. Your role is to:
-1. Analyze medical reports and provide clear, accurate interpretations
-2. Highlight important medical findings and their implications
-3. Explain medical terminology in simple terms when needed
-4. Maintain professional and empathetic communication
-5. Focus on factual information from the report
-6. Avoid making definitive diagnoses or treatment recommendations
-7. Always cite specific parts of the report when providing information
-
-Remember to:
-- Be precise and clear in your explanations
-- Use appropriate medical terminology while remaining accessible
-- Maintain patient confidentiality
-- Focus on the information present in the report
-- Indicate when information is unclear or missing"""
+# Page configuration
+st.set_page_config(page_title="Medical Report Analysis", page_icon="🏥")
 
 # Initialize session state
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+if 'processed_text' not in st.session_state:
+    st.session_state.processed_text = None
+if 'vector_store' not in st.session_state:
+    st.session_state.vector_store = None
 
-# Function to process uploaded document
-def process_document(uploaded_file):
-    with st.spinner("Processing document..."):
-        # Read the file
-        file_bytes = uploaded_file.read()
-        
-        # Convert to image for OCR
-        image = Image.open(io.BytesIO(file_bytes))
-        
-        # Perform OCR
+def extract_text_from_image(image):
+    """Extract text from image using Tesseract OCR"""
+    try:
         text = pytesseract.image_to_string(image)
-        
+        return text
+    except Exception as e:
+        st.error(f"Error in OCR processing: {str(e)}")
+        return None
+
+def create_vector_store(text):
+    """Create vector store from extracted text"""
+    try:
         # Split text into chunks
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -59,69 +40,158 @@ def process_document(uploaded_file):
         )
         chunks = text_splitter.split_text(text)
         
-        return chunks
-
-# Function to get LLM response
-def get_llm_response(prompt, context):
-    try:
-        response = completion(
-            model=os.getenv("LITELLM_MODEL", "gpt-4o-mini"),
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Context: {context}\n\nQuestion: {prompt}"}
-            ],
-            api_key=os.getenv("LITELLM_API_KEY", "sk-V12plNmxne0F7XIQuyzJDQ"),
-            base_url=os.getenv("LITELLM_BASE_URL", "https://litellm.aiplanet.com/"),
-            temperature=0.3
+        # Create documents
+        documents = [Document(page_content=chunk) for chunk in chunks]
+        
+        # Initialize embeddings
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
-        return response.choices[0].message.content
+        
+        # Create vector store
+        vector_store = Qdrant.from_documents(
+            documents,
+            embeddings,
+            location=":memory:",
+            collection_name="medical_reports"
+        )
+        
+        return vector_store
     except Exception as e:
-        st.error(f"Error getting LLM response: {str(e)}")
+        st.error(f"Error creating vector store: {str(e)}")
+        return None
+
+def analyze_medical_report(vector_store, query):
+    """Analyze medical report using LiteLLM"""
+    try:
+        # Initialize LiteLLM
+        llm = ChatLiteLLM(
+            model=st.secrets["LITELLM_MODEL"],
+            api_key=st.secrets["LITELLM_API_KEY"],
+            api_base=st.secrets["LITELLM_BASE_URL"]
+        )
+        
+        # Create prompt template
+        prompt_template = """
+        You are a medical AI assistant analyzing a medical report. Based on the following context from the medical report, please provide a comprehensive analysis.
+
+        Context: {context}
+
+        Question: {question}
+
+        Please provide a detailed analysis focusing on:
+        1. Key medical findings
+        2. Potential concerns or abnormalities
+        3. Recommendations for follow-up
+        4. Overall assessment
+
+        Analysis:
+        """
+        
+        prompt = PromptTemplate(
+            template=prompt_template,
+            input_variables=["context", "question"]
+        )
+        
+        # Create retrieval QA chain
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
+            chain_type_kwargs={"prompt": prompt}
+        )
+        
+        # Get response
+        response = qa_chain.run(query)
+        return response
+        
+    except Exception as e:
+        st.error(f"Error in analysis: {str(e)}")
         return None
 
 # Main app
-def main():
-    # File uploader
-    uploaded_file = st.file_uploader("Upload Medical Report", type=['pdf', 'png', 'jpg', 'jpeg'])
-    
-    if uploaded_file is not None:
-        # Process document
-        chunks = process_document(uploaded_file)
-        
-        # Initialize embeddings
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        
-        # Create vector store
-        vectorstore = Qdrant.from_texts(
-            chunks,
-            embeddings,
-            location=":memory:"
-        )
-        
-        # Chat interface
-        st.subheader("Ask questions about the report")
-        user_question = st.text_input("Your question:")
-        
-        if user_question:
-            with st.spinner("Analyzing..."):
-                # Get relevant context
-                docs = vectorstore.similarity_search(user_question, k=3)
-                context = "\n".join([doc.page_content for doc in docs])
-                
-                # Get response from LLM
-                response = get_llm_response(user_question, context)
-                
-                if response:
-                    # Update chat history
-                    st.session_state.chat_history.append((user_question, response))
-                    
-                    # Display response
-                    st.write("Answer:", response)
-                    
-                    # Display sources
-                    with st.expander("View Sources"):
-                        for doc in docs:
-                            st.write(doc.page_content)
+st.title("🏥 Medical Report Analysis")
+st.write("Upload a medical report image for AI-powered analysis")
 
-if __name__ == "__main__":
-    main()
+# File uploader
+uploaded_file = st.file_uploader(
+    "Choose a medical report image",
+    type=['png', 'jpg', 'jpeg', 'tiff', 'bmp']
+)
+
+if uploaded_file is not None:
+    # Display uploaded image
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Uploaded Medical Report", use_column_width=True)
+    
+    # Process button
+    if st.button("Process Report"):
+        with st.spinner("Extracting text from image...", show_time=True):
+            # Extract text using OCR
+            extracted_text = extract_text_from_image(image)
+            
+            if extracted_text:
+                st.session_state.processed_text = extracted_text
+                
+                # Create vector store
+                with st.spinner("Creating knowledge base...", show_time=True):
+                    vector_store = create_vector_store(extracted_text)
+                    if vector_store:
+                        st.session_state.vector_store = vector_store
+                        st.success("Report processed successfully!")
+                    else:
+                        st.error("Failed to create knowledge base")
+            else:
+                st.error("Failed to extract text from image")
+
+# Display extracted text
+if st.session_state.processed_text:
+    with st.expander("View Extracted Text"):
+        st.text_area("Extracted Text", st.session_state.processed_text, height=200)
+
+# Analysis section
+if st.session_state.vector_store:
+    st.subheader("📊 Medical Report Analysis")
+    
+    # Predefined analysis options
+    analysis_options = [
+        "Provide a comprehensive analysis of this medical report",
+        "What are the key findings in this report?",
+        "Are there any abnormal values or concerning findings?",
+        "What follow-up actions are recommended?",
+        "Summarize the patient's condition"
+    ]
+    
+    selected_analysis = st.selectbox("Choose analysis type:", analysis_options)
+    
+    # Custom query option
+    custom_query = st.text_input("Or ask a custom question about the report:")
+    
+    if st.button("Analyze Report"):
+        query = custom_query if custom_query else selected_analysis
+        
+        with st.spinner("Analyzing medical report...", show_time=True):
+            analysis_result = analyze_medical_report(st.session_state.vector_store, query)
+            
+            if analysis_result:
+                st.subheader("🔍 Analysis Results")
+                st.write(analysis_result)
+            else:
+                st.error("Failed to analyze the report")
+
+# Sidebar with information
+st.sidebar.title("ℹ️ About")
+st.sidebar.write("""
+This app uses:
+- **Tesseract OCR** for text extraction
+- **LangChain** for document processing
+- **Qdrant** for vector storage
+- **HuggingFace** for embeddings
+- **LiteLLM** for AI analysis
+
+**Note:** This is for educational purposes only and should not replace professional medical advice.
+""")
+
+# Footer
+st.markdown("---")
+st.markdown("**Disclaimer:** This tool is for educational purposes only. Always consult healthcare professionals for medical advice.")
