@@ -1,3 +1,18 @@
+# Required packages:
+# streamlit>=1.24.0
+# pandas>=1.5.0
+# numpy>=1.21.0
+# Pillow>=9.0.0
+# plotly>=5.13.0
+# langchain>=0.0.200
+# faiss-cpu>=1.7.4
+# sentence-transformers>=2.2.2
+# pytesseract>=0.3.10
+# opencv-python>=4.7.0
+# PyMuPDF>=1.21.0
+# azure-ai-formrecognizer>=3.2.0
+# litellm>=0.1.0
+
 import streamlit as st
 import pandas as pd
 import numpy as np
