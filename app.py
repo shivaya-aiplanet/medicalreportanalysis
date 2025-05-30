@@ -20,8 +20,12 @@ if 'processed_text' not in st.session_state:
     st.session_state.processed_text = None
 if 'vector_store' not in st.session_state:
     st.session_state.vector_store = None
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+if 'comprehensive_analysis' not in st.session_state:
+    st.session_state.comprehensive_analysis = None
+if 'key_findings' not in st.session_state:
+    st.session_state.key_findings = None
+if 'abnormal_findings' not in st.session_state:
+    st.session_state.abnormal_findings = None
 
 def extract_text_from_image(uploaded_file):
     """Extract text from image using Azure AI Document Intelligence"""
@@ -108,7 +112,7 @@ def analyze_medical_report(vector_store, query):
             api_base=st.secrets["LITELLM_BASE_URL"]
         )
         
-        # Create prompt template - adaptive based on question type
+        # Create prompt template
         prompt_template = """
         You are a medical AI assistant. Based on the medical report context provided, answer the question appropriately:
 
@@ -147,6 +151,24 @@ def analyze_medical_report(vector_store, query):
         st.error(f"Error in analysis: {str(e)}")
         return None
 
+def generate_automatic_analyses(vector_store):
+    """Generate the three automatic analyses"""
+    analyses = {}
+    
+    # Comprehensive Analysis
+    with st.spinner("🔍 Generating comprehensive analysis..."):
+        analyses['comprehensive'] = analyze_medical_report(vector_store, "Provide a comprehensive analysis of this medical report")
+    
+    # Key Findings
+    with st.spinner("📋 Extracting key findings..."):
+        analyses['key_findings'] = analyze_medical_report(vector_store, "What are the key findings in this report?")
+    
+    # Abnormal Findings
+    with st.spinner("⚠️ Checking for abnormal findings..."):
+        analyses['abnormal'] = analyze_medical_report(vector_store, "Are there any abnormal values or concerning findings?")
+    
+    return analyses
+
 # Main app
 st.title("🏥 Medical Report Analysis")
 st.write("Upload a medical report image for AI-powered analysis")
@@ -178,8 +200,14 @@ if uploaded_file is not None:
                     vector_store = create_vector_store_cached(extracted_text)
                     if vector_store:
                         st.session_state.vector_store = vector_store
-                        st.session_state.chat_history = []  # Reset chat history for new document
-                        st.success("✅ Report processed successfully! You can now ask questions below.")
+                        
+                        # Generate automatic analyses
+                        analyses = generate_automatic_analyses(vector_store)
+                        st.session_state.comprehensive_analysis = analyses['comprehensive']
+                        st.session_state.key_findings = analyses['key_findings']
+                        st.session_state.abnormal_findings = analyses['abnormal']
+                        
+                        st.success("✅ Report processed successfully!")
                     else:
                         st.error("Failed to prepare analysis system")
             else:
@@ -190,71 +218,44 @@ if st.session_state.processed_text:
     with st.expander("View Extracted Text"):
         st.text_area("Extracted Text", st.session_state.processed_text, height=200)
 
-# Analysis section
-if st.session_state.vector_store:
-    st.subheader("📊 Medical Report Analysis")
+# Display automatic analyses
+if st.session_state.comprehensive_analysis:
+    st.markdown("---")
+    st.subheader("📊 Automatic Medical Report Analysis")
     
-    # Predefined analysis options
-    st.write("**Quick Analysis Options:**")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📋 Comprehensive Analysis", use_container_width=True):
-            query = "Provide a comprehensive analysis of this medical report"
-            st.session_state.chat_history.append(("user", query))
-            
-        if st.button("⚠️ Abnormal Findings", use_container_width=True):
-            query = "Are there any abnormal values or concerning findings?"
-            st.session_state.chat_history.append(("user", query))
-    
-    with col2:
-        if st.button("🔍 Key Findings", use_container_width=True):
-            query = "What are the key findings in this report?"
-            st.session_state.chat_history.append(("user", query))
-            
-        if st.button("📝 Follow-up Recommendations", use_container_width=True):
-            query = "What follow-up actions are recommended?"
-            st.session_state.chat_history.append(("user", query))
+    # Comprehensive Analysis
+    st.markdown("## 📋 Comprehensive Analysis")
+    st.write(st.session_state.comprehensive_analysis)
     
     st.markdown("---")
     
-    # Chat interface
-    st.write("**💬 Ask Questions About Your Report:**")
+    # Key Findings
+    st.markdown("## 🔍 Key Findings")
+    st.write(st.session_state.key_findings)
     
-    # Display chat history
-    for i, (role, message) in enumerate(st.session_state.chat_history):
-        if role == "user":
-            with st.container():
-                st.write(f"**You:** {message}")
-        else:
-            with st.container():
-                st.write(f"**AI Assistant:** {message}")
-                st.markdown("---")
+    st.markdown("---")
     
-    # Process the latest question if there's one
-    if st.session_state.chat_history and st.session_state.chat_history[-1][0] == "user":
-        latest_query = st.session_state.chat_history[-1][1]
-        
+    # Abnormal Findings
+    st.markdown("## ⚠️ Abnormal Findings")
+    st.write(st.session_state.abnormal_findings)
+    
+    st.markdown("---")
+
+# Custom query section
+if st.session_state.vector_store:
+    st.subheader("❓ Ask a Specific Question")
+    st.write("Enter your specific question about the medical report:")
+    
+    user_query = st.text_input("Your question:", placeholder="e.g., What is the patient's blood pressure? What medications are recommended?")
+    
+    if st.button("Get Answer") and user_query:
         with st.spinner("🤔 Analyzing your question..."):
-            analysis_result = analyze_medical_report(st.session_state.vector_store, latest_query)
-            
-            if analysis_result:
-                st.session_state.chat_history.append(("assistant", analysis_result))
-                st.rerun()
+            answer = analyze_medical_report(st.session_state.vector_store, user_query)
+            if answer:
+                st.markdown("### Answer:")
+                st.write(answer)
             else:
                 st.error("Sorry, I couldn't analyze your question. Please try again.")
-    
-    # Input for new questions
-    user_question = st.text_input("Ask a follow-up question:", key=f"user_input_{len(st.session_state.chat_history)}")
-    
-    if st.button("Ask Question") and user_question:
-        st.session_state.chat_history.append(("user", user_question))
-        st.rerun()
-    
-    # Clear chat button
-    if st.button("🗑️ Clear Conversation"):
-        st.session_state.chat_history = []
-        st.rerun()
 
 # Disclaimer
 st.markdown("---")
